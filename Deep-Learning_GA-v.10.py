@@ -25,11 +25,11 @@ def initialize_hyperparameters():
     K_NEIGHBORS = 10
     GENERATIONS = 1000
     # options are: 'roulette wheel', 'rank', 'tournament'
-    SELECTION_METHOD = 'roulette wheel'
+    SELECTION_METHOD = 'tournament'
     # options are: 'single point', 'multiple point', 'uniform point', 'OX', 'PMX'
-    CROSSOVER_METHOD = 'single point'
+    CROSSOVER_METHOD = 'multiple point'
     # options are: 'random', 'elitism' for the first value, and 'gauss', 'reset' for the second
-    MUTATION_METHOD = ['elitism', 'gauss']
+    MUTATION_METHOD = ['elitism', 'reset']
     # options are: 'binary', 'decimal', 'bucket'
     # TODO: Code 'binary' and 'bucket' encoding
     ENCODING_METHOD = 'decimal'
@@ -186,7 +186,7 @@ def tournament_selection(population, optim):
         k = numpy.ceil(SEQUENCE[i] * 10).astype(numpy.int64)
         chromosome_pointers = numpy.random.choice(numpy.arange(population.shape[0]), k)
         evaluation = pearsons[chromosome_pointers].max()
-        parents[i] = pearsons[pearsons == evaluation]
+        parents[i] = pearsons[pearsons == evaluation].max()
     return index_to_chromosome_decode(parents, population)
 
 
