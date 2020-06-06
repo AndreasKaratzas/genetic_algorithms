@@ -19,8 +19,8 @@ EVALUATION_REPOSITORY = None
 
 def initialize_hyperparameters():
     MUTATION_PROBABILITY = 0.1
-    SELECTION_PROBABILITY = 0.6
-    POPULATION_SIZE = 20
+    SELECTION_PROBABILITY = 0.9
+    POPULATION_SIZE = 200
     # if K_NEIGHBORS is an odd number, then the algorithm might not work
     K_NEIGHBORS = 10
     GENERATIONS = 1000
@@ -57,6 +57,10 @@ def fetch_user_vector(user, tabular_np):
 def evaluate_chromosome(chromosome, optim):
     # pearson's correlation metric
     return numpy.corrcoef(chromosome, optim)[0, 1]
+    # cosine similarity metric
+    # return 1 - scipy.spatial.distance.cosine(optim, chromosome)
+    # mse metric
+    # return 10 - (numpy.square(optim - chromosome)).mean(axis=None)
 
 
 def fetch_neighborhood(user, tabular_np, k):
@@ -273,18 +277,18 @@ def multiple_point_crossover(parent_pairs, x_probability):
                 # append children to form the new population
                 if i == 0:
                     # if loop run for first time, then initialize the generation population
-                    population_hat = numpy.vstack((a, b))
+                    population_hat = numpy.stack((a, b))
                 else:
                     # after first time, stack chromosomes to the generation population
-                    population_hat = numpy.stack((population_hat, numpy.vstack((a, b))))
+                    population_hat = numpy.vstack((population_hat, numpy.stack((a, b))))
             else:
                 # append parents to the new population
                 if i == 0:
                     # if loop run for first time, then initialize the generation population
-                    population_hat = numpy.vstack((X, Y))
+                    population_hat = numpy.stack((X, Y))
                 else:
                     # after first time, stack chromosomes to the generation population
-                    population_hat = numpy.stack((population_hat, numpy.vstack((X, Y))))
+                    population_hat = numpy.vstack((population_hat, numpy.stack((X, Y))))
     return population_hat
 
 
@@ -327,18 +331,18 @@ def uniform_crossover(parent_pairs, x_probability):
                 # append children to form the new population
                 if i == 0:
                     # if loop run for first time, then initialize the generation population
-                    population_hat = numpy.vstack((a, b))
+                    population_hat = numpy.stack((a, b))
                 else:
                     # after first time, stack chromosomes to the generation population
-                    population_hat = numpy.stack((population_hat, numpy.vstack((a, b))))
+                    population_hat = numpy.vstack((population_hat, numpy.stack((a, b))))
             else:
                 # append parents to the new population
                 if i == 0:
                     # if loop run for first time, then initialize the generation population
-                    population_hat = numpy.vstack((X, Y))
+                    population_hat = numpy.stack((X, Y))
                 else:
                     # after first time, stack chromosomes to the generation population
-                    population_hat = numpy.stack((population_hat, numpy.vstack((X, Y))))
+                    population_hat = numpy.vstack((population_hat, numpy.stack((X, Y))))
     return population_hat
 
 
@@ -504,7 +508,7 @@ def random_mutation(population, m_probability, m_method):
                 mutated_population = mutated_chromosome
             else:
                 # after first time, stack chromosomes to the generation population
-                mutated_population = numpy.stack((mutated_population, mutated_chromosome))
+                mutated_population = numpy.vstack((mutated_population, mutated_chromosome))
         else:
             # NO mutation
             # append chromosomes to the mutated population
@@ -513,7 +517,7 @@ def random_mutation(population, m_probability, m_method):
                 mutated_population = chromosome
             else:
                 # after first time, stack chromosomes to the generation population
-                mutated_population = numpy.stack((mutated_population, chromosome))
+                mutated_population = numpy.vstack((mutated_population, chromosome))
     return mutated_population
 
 
@@ -636,6 +640,15 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
                 #                 save_results(user, evaluation)
                 break
 
+        similarity = numpy.zeros(chromosomes.shape[0], dtype=numpy.int64)
+        mse = numpy.zeros(chromosomes.shape[0], dtype=numpy.int64)
+        for i in range(similarity.shape[0]):
+            similarity[i] = 1 - scipy.spatial.distance.cosine(optim_values, chromosomes[i])
+            mse[i] = (numpy.square(optim_values - chromosomes[i])).mean(axis=None)
+        numpy.savetxt("similarity.csv", similarity, delimiter=",")
+        numpy.savetxt("mse.csv", mse, delimiter=",")
+        numpy.savetxt("optim.csv", optim_values.astype(int), fmt='%i', delimiter="\t")
+        numpy.savetxt("population.csv", chromosomes.astype(int), fmt='%i', delimiter="\t")
 
 #     # save population to secondary memory
 #     save_to_csv(chromosomes)
