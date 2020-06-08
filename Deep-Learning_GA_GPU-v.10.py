@@ -1,8 +1,9 @@
 import tqdm
 import cupy
-import numpy
 import pandas
 import scipy.spatial
+
+cupy.random.seed(42)
 
 # hyperparameters used only when convergence method is 'best_chr'
 BEST_CHROMOSOME_CONVERGENCE_LIMIT = 10
@@ -21,12 +22,12 @@ EVALUATION_REPOSITORY = None
 def initialize_hyperparameters():
     MUTATION_PROBABILITY = 0.1
     SELECTION_PROBABILITY = 0.9
-    POPULATION_SIZE = 200
+    POPULATION_SIZE = 20
     # if K_NEIGHBORS is an odd number, then the algorithm might not work
     K_NEIGHBORS = 10
-    GENERATIONS = 1000
+    GENERATIONS = 10000
     # options are: 'roulette wheel', 'rank', 'tournament'
-    SELECTION_METHOD = 'tournament'
+    SELECTION_METHOD = 'rank'
     # options are: 'single point', 'multiple point', 'uniform point', 'OX', 'PMX'
     CROSSOVER_METHOD = 'multiple point'
     # options are: 'random', 'elitism' for the first value, and 'gauss', 'reset' for the second
@@ -57,11 +58,13 @@ def fetch_user_vector(user, tabular_np):
 
 def evaluate_chromosome(chromosome, optim):
     # pearson's correlation metric
-    return cupy.corrcoef(chromosome, optim)[0, 1]
+    # return cupy.corrcoef(chromosome, optim)[0, 1]
     # cosine similarity metric
     # return 1 - scipy.spatial.distance.cosine(optim, chromosome)
     # mse metric
     # return 10 - (cupy.square(optim - chromosome)).mean(axis=None)
+    # number of common elements between chromosomes
+    return len(cupy.where(chromosome == optim)[0])
 
 
 def fetch_neighborhood(user, tabular_np, k):
@@ -151,23 +154,31 @@ def roulette_wheel_selection(population, optim):
 
 
 def rank_selection(population, optim):
-    # get pearsons
-    pearsons = cupy.empty((population.shape[0]), dtype=cupy.float64)
+    # define evaluation vector
+    pearsons = cupy.zeros((population.shape[0]), dtype=cupy.float64)
+    # get all chromosome evaluations
     pearsons = cupy.fromiter((evaluate_chromosome(population[i], optim) for i in range(population.shape[0])), pearsons.
                              dtype)
+    # define ranks values vector
     rank_vals = cupy.zeros(population.shape[0])
-    rank_indx = cupy.empty(population.shape[0], dtype=cupy.int64)
-    probabilities = cupy.empty(population.shape[0], dtype=cupy.int64)
+    # define ranks indeces vector
+    rank_indx = cupy.zeros(population.shape[0], dtype=cupy.int64)
+    # define rank based probabilities vector
+    probabilities = cupy.zeros(population.shape[0], dtype=cupy.int64)
+    # deploy rank selection algorithm
     for p_counter, j in enumerate(pearsons):
         for r_counter, k in enumerate(rank_vals):
+            # check if rank is lower than evaluation
             if j > k:
                 rank_vals[r_counter] = j
                 rank_indx[r_counter] = p_counter
+            # sort ranks values and indeces
             for sort_i_indx, i_val in enumerate(rank_vals):
                 for sort_j_indx, j_val in enumerate(rank_vals):
                     if i_val > j_val:
-                        rank_vals[sort_j_indx] = sort_j_indx[sort_i_indx]
-                        sort_j_indx[sort_i_indx] = j_val
+                        tmp = j_val
+                        rank_vals[sort_j_indx] = i_val
+                        rank_vals[sort_i_indx] = tmp
                         tmp = rank_indx[sort_j_indx]
                         rank_indx[sort_j_indx] = rank_indx[sort_i_indx]
                         rank_indx[sort_i_indx] = tmp
@@ -177,17 +188,20 @@ def rank_selection(population, optim):
 def tournament_selection(population, optim):
     # initialize random sequence
     SEQUENCE = cupy.random.uniform(0, 1, population.shape[0])
-    # get pearson's
-    pearsons = cupy.empty((population.shape[0]), dtype=cupy.float64)
+    # get pearsons
+    pearsons = cupy.zeros((population.shape[0]), dtype=cupy.int64)
     pearsons = cupy.fromiter((evaluate_chromosome(population[i], optim) for i in range(population.shape[0])), pearsons.
                              dtype)
     # get parents
-    parents = cupy.empty(population.shape[0], dtype=cupy.int64)
+    parents = cupy.zeros(population.shape[0], dtype=cupy.int64)
     for i in range(population.shape[0]):
         k = cupy.ceil(SEQUENCE[i] * 10).astype(cupy.int64)
         chromosome_pointers = cupy.random.choice(cupy.arange(population.shape[0]), k)
         evaluation = pearsons[chromosome_pointers].max()
-        parents[i] = pearsons[pearsons == evaluation].max()
+        if len(cupy.where(pearsons == evaluation)[0]) > 1:
+            parents[i] = cupy.where(pearsons == evaluation)[0][0]
+        else:
+            parents[i] = cupy.where(pearsons == evaluation)[0]
     return index_to_chromosome_decode(parents, population)
 
 
@@ -297,8 +311,7 @@ def uniform_crossover(parent_pairs, x_probability):
     # define random chromosome probability sequence (to decide randomly whether ot perform crossover or not)
     X_SEQUENCE = cupy.random.uniform(0, 1, parent_pairs.shape[0])
     # define random element probability sequence (for uniform crossover)
-    U_SEQUENCE = cupy.random.uniform(0, 1, parent_pairs.shape[0] * parent_pairs.shape[1]).reshape(
-        parent_pairs.shape[0], parent_pairs.shape[1])
+    U_SEQUENCE = cupy.random.uniform(0, 1, parent_pairs.shape[0] * parent_pairs.shape[1]).reshape(parent_pairs.shape[0], parent_pairs.shape[1])
     # define element probability crossover (for uniform crossover)
     CONST_PROB = 0.5
     # define new generation population variable
@@ -313,22 +326,22 @@ def uniform_crossover(parent_pairs, x_probability):
         # initialize new chromosome
         a, b = cupy.zeros((2, chromosome_shape), dtype=cupy.int64)
         if not compatible_chromosomes:
-            print("\nError [15]: Incompatible chromosomes (at: multiple point selection\nExiting...)")
+            print("Error [14]: Incompatible chromosomes (at: multiple point selection)\nExiting...)")
             exit()
         else:
             # crossover with respect to the crossover probability
             if X_SEQUENCE[i] < x_probability:
                 # create children
-                for c, (i, j) in enumerate(zip(X, Y)):
+                for c, (k, l) in enumerate(zip(X, Y)):
                     # repeatedly toss a coin and check with respect to CONST_PROB
                     if CONST_PROB > U_SEQUENCE[i][c]:
                         # gene exchange
-                        a[c] = j
-                        b[c] = i
+                        a[c] = l
+                        b[c] = k
                     else:
                         # NO gene exchange
-                        a[c] = i
-                        b[c] = j
+                        a[c] = k
+                        b[c] = l
                 # append children to form the new population
                 if i == 0:
                     # if loop run for first time, then initialize the generation population
@@ -397,16 +410,16 @@ def crossover_chromosomes(x_probability, x_method, selection_method, population,
 
 # returns index of elite chromosome
 def get_elite_chromosome(population, optim):
-    idx, val, max_pearson = -1.1, None, 0
+    idx, val, max_evals = -1, None, 0
     for i in range(population.shape[0]):
         val = evaluate_chromosome(population[i], optim)
-        if max_pearson < val:
+        if max_evals < val:
             idx = i
-            max_pearson = val
+            max_evals = val
     if idx == -1:
         print('\nError [11]: Invalid elite chromosome index [at get elite chromosome]\nExiting...')
         exit()
-    if max_pearson < -1:
+    if max_evals < -1:
         print('\nError [9]: Invalid pearson maximum correlation coefficient\n\t\t\t[at get elite '
               'chromosome]\nExiting...')
         exit()
@@ -641,15 +654,26 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
                 #                 save_results(user, evaluation)
                 break
 
-        similarity = cupy.zeros(chromosomes.shape[0], dtype=cupy.int64)
-        mse = cupy.zeros(chromosomes.shape[0], dtype=cupy.int64)
-        for i in range(similarity.shape[0]):
-            similarity[i] = 1 - scipy.spatial.distance.cosine(optim_values, chromosomes[i])
-            mse[i] = (cupy.square(optim_values - chromosomes[i])).mean(axis=None)
-        cupy.savetxt("similarity.csv", similarity, delimiter=",")
-        cupy.savetxt("mse.csv", mse, delimiter=",")
-        cupy.savetxt("optim.csv", optim_values.astype(int), fmt='%i', delimiter="\t")
-        cupy.savetxt("population.csv", chromosomes.astype(int), fmt='%i', delimiter="\t")
+            universe_evaluation = cupy.fromiter(
+                (evaluate_chromosome(chromosomes[i], optim_values) for i in range(chromosomes.shape[0])), cupy.int64)
+            # stop if 90% accuracy
+            if universe_evaluation.max() > 90 * chromosomes[0].shape[0] / 100:
+                print(universe_evaluation)
+                break
+
+            # every 1000 generations print mean population evaluation
+            if gen % 1000 == 999:
+                print(cupy.mean(universe_evaluation).astype(cupy.int64))
+
+        # similarity = cupy.zeros(chromosomes.shape[0], dtype=cupy.int64)
+        # mse = cupy.zeros(chromosomes.shape[0], dtype=cupy.int64)
+        # for i in range(similarity.shape[0]):
+        #     similarity[i] = 1 - scipy.spatial.distance.cosine(optim_values, chromosomes[i])
+        #     mse[i] = (cupy.square(optim_values - chromosomes[i])).mean(axis=None)
+        # cupy.savetxt("similarity.csv", similarity, delimiter=",")
+        # cupy.savetxt("mse.csv", mse, delimiter=",")
+        # cupy.savetxt("optim.csv", optim_values.astype(int), fmt='%i', delimiter="\t")
+        # cupy.savetxt("population.csv", chromosomes.astype(int), fmt='%i', delimiter="\t")
 
 
 #     # save population to secondary memory

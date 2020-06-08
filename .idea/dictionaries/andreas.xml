@@ -1,6 +1,12 @@
 <component name="ProjectDictionaryState">
   <dictionary name="andreas">
     <words>
+      <w>astype</w>
+      <w>corrcoef</w>
+      <w>cupy</w>
+      <w>dtype</w>
+      <w>evals</w>
+      <w>savetxt</w>
       <w>scipy</w>
     </words>
   </dictionary>
