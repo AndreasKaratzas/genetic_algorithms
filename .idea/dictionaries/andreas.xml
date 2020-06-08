@@ -6,6 +6,8 @@
       <w>cupy</w>
       <w>dtype</w>
       <w>evals</w>
+      <w>matplotlib</w>
+      <w>pyplot</w>
       <w>savetxt</w>
       <w>scipy</w>
     </words>
