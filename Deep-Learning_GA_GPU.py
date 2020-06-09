@@ -6,13 +6,6 @@ import matplotlib.pyplot
 
 cupy.random.seed(42)
 
-# hyperparameters used only when convergence method is 'best_chr'
-BEST_CHROMOSOME_CONVERGENCE_LIMIT = 10
-BEST_CHROMOSOME_CONVERGENCE_COUNTER = 0
-
-# hyperparameters used only when convergence method is 'percentage'
-PERCENTAGE_CHROMOSOME_CONVERGENCE_LIMIT = 1e-2
-
 
 def initialize_hyperparameters():
     MUTATION_PROBABILITY = 0.1
@@ -26,14 +19,19 @@ def initialize_hyperparameters():
     # options are: 'single point', 'multiple point', 'uniform point', 'OX', 'PMX'
     CROSSOVER_METHOD = 'multiple point'
     # options are: 'random', 'elitism' for the first value, and 'gauss', 'reset' for the second
-    MUTATION_METHOD = ['elitism', 'reset']
+    MUTATION_METHOD = ['elitism', 'gauss']
     # options are: 'binary', 'decimal', 'bucket'
     # TODO: Code 'binary' and 'bucket' encoding
     ENCODING_METHOD = 'decimal'
     # options are: 'best_chr', 'percentage', 'generation'
     CONVERGENCE_METHOD = 'generation'
+    # hyperparameter used only when convergence method is 'best_chr'
+    BEST_CHROMOSOME_CONVERGENCE_LIMIT = 10
+    # hyperparameters used only when convergence method is 'percentage'
+    PERCENTAGE_CHROMOSOME_CONVERGENCE_LIMIT = 1e-2
     return MUTATION_PROBABILITY, SELECTION_PROBABILITY, POPULATION_SIZE, GENERATIONS, SELECTION_METHOD, \
-           CROSSOVER_METHOD, MUTATION_METHOD, K_NEIGHBORS, ENCODING_METHOD, CONVERGENCE_METHOD
+           CROSSOVER_METHOD, MUTATION_METHOD, K_NEIGHBORS, ENCODING_METHOD, CONVERGENCE_METHOD, \
+           BEST_CHROMOSOME_CONVERGENCE_LIMIT, PERCENTAGE_CHROMOSOME_CONVERGENCE_LIMIT
 
 
 def import_data():
@@ -568,30 +566,30 @@ def evaluate_generation(population, optim):
     return evaluation
 
 
-def genetic_algorithm_convergence(evaluation, gen, conv_method, population, optim,
-                                  best_chromosome_convergence_counter=BEST_CHROMOSOME_CONVERGENCE_COUNTER,
-                                  best_chromosome_convergence_limit=BEST_CHROMOSOME_CONVERGENCE_LIMIT):
+def genetic_algorithm_convergence(evaluation, gen, conv_method, population, optim, BEST_CHR_CONV_LIM, BEST_CHR_CONV_CTR,
+                                  PERCENT_CHR_CONV_LIM):
     stop = False
     if conv_method == 'best_chr':
         gen_eval = evaluate_best_chromosome(population, optim)
         evaluation[gen] = gen_eval
         if evaluation[gen] == evaluation[gen - 1]:
-            best_chromosome_convergence_counter += 1
-            if best_chromosome_convergence_counter > best_chromosome_convergence_limit:
+            BEST_CHR_CONV_CTR += 1
+            if BEST_CHR_CONV_CTR > BEST_CHR_CONV_LIM:
                 stop = True
+            else:
+                BEST_CHR_CONV_CTR = 0
     elif conv_method == 'percentage':
         gen_eval = evaluate_generation(population, optim)
         evaluation[gen] = gen_eval
-        if cupy.abs(evaluation[gen] - evaluation[gen - 1]) < best_chromosome_convergence_limit:
+        if cupy.abs(evaluation[gen] - evaluation[gen - 1]) < PERCENT_CHR_CONV_LIM:
             stop = True
     elif conv_method == 'generation':
-        # if gen == 0:
-        #     print('\nWarning [4]: Algorithm does not perform early stopping [at genetic algorithm convergence]')
-        return stop, evaluation
+        if gen == 0:
+            print('Warning [4]: Algorithm does not perform early stopping [at genetic algorithm convergence]')
     else:
-        print('\nError [9]: Invalid mutation method [at mutate chromosomes]\nExiting...')
+        print('Error [9]: Invalid mutation method [at mutate chromosomes]\nExiting...')
         exit()
-    return stop, evaluation
+    return stop, evaluation, BEST_CHR_CONV_CTR
 
 
 def save_population(user, population, optim):
@@ -625,7 +623,7 @@ def save_evaluations(user, population, optim):
 
 
 def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CROSS_M, MUT_METHOD, K, items, encoding,
-                          CONV_M):
+                          CONV_M, BEST_CHR_CONV_LIM, PERCENT_CHR_CONV_LIM):
     for user in tqdm.tqdm(range(items.shape[0])):
         # define evaluations list to plot afterwards
         U_EVALS_LIST = list()
@@ -649,7 +647,7 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
         # random initialize population (chromosomes)
         chromosomes = cupy.random.choice(cupy.unique(optim_values), (P_SIZE, optim_values.shape[0]))
         # initialize error (evaluation) array
-        evaluation = cupy.zeros(1000)
+        evaluation = cupy.zeros(optim_values.shape[0])
         # initialize early stopping conditional
         stop = False
         # fit GA
@@ -659,7 +657,9 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
             # mutate chromosomes
             chromosomes = mutate_chromosomes(M_PROBABILITY, MUT_METHOD, chromosomes, optim_values)
             # check GA convergence
-            stop, evaluation = genetic_algorithm_convergence(evaluation, gen, CONV_M, chromosomes, optim_values)
+            stop, evaluation, BEST_CHR_CONV_CTR = genetic_algorithm_convergence(evaluation, gen, CONV_M, chromosomes,
+                                                                                optim_values, BEST_CHR_CONV_LIM,
+                                                                                BEST_CHR_CONV_CTR, PERCENT_CHR_CONV_LIM)
             if stop is True:
                 # save population
                 save_population(user, chromosomes, optim_values)
@@ -709,12 +709,13 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
 
 def main():
     # hyperparameter definition
-    M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CROSS_M, MUT_METHOD, K, ENC, CONV = initialize_hyperparameters()
+    M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CROSS_M, MUT_METHOD, K, ENC, CONV, BEST_CHR_CONV_LIM, \
+        PERCENT_CHR_CONV_LIM = initialize_hyperparameters()
     # GA fitting data
     tabular_df, tabular_np = import_data()
     # fit GA
     fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CROSS_M, MUT_METHOD, K, tabular_np, ENC,
-                          CONV)
+                          CONV, BEST_CHR_CONV_LIM, PERCENT_CHR_CONV_LIM)
 
 
 if __name__ == '__main__':
