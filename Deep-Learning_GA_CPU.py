@@ -1,15 +1,20 @@
+import sys
 import tqdm
 import numpy
 import pandas
 import scipy.spatial
 import matplotlib.pyplot
 
+if not sys.warnoptions:
+    import warnings
+    warnings.simplefilter("ignore")
+
 numpy.random.seed(42)
 
 
 def initialize_hyperparameters():
-    MUTATION_PROBABILITY = 0.1
-    SELECTION_PROBABILITY = 0.9
+    MUTATION_PROBABILITY = 0.3
+    CROSSOVER_PROBABILITY = 0.9
     POPULATION_SIZE = 200
     # if K_NEIGHBORS is an odd number, then the algorithm might not work
     K_NEIGHBORS = 10
@@ -29,7 +34,7 @@ def initialize_hyperparameters():
     BEST_CHROMOSOME_CONVERGENCE_LIMIT = 10
     # hyperparameters used only when convergence method is 'percentage'
     PERCENTAGE_CHROMOSOME_CONVERGENCE_LIMIT = 1e-2
-    return MUTATION_PROBABILITY, SELECTION_PROBABILITY, POPULATION_SIZE, GENERATIONS, SELECTION_METHOD, \
+    return MUTATION_PROBABILITY, CROSSOVER_PROBABILITY, POPULATION_SIZE, GENERATIONS, SELECTION_METHOD, \
            CROSSOVER_METHOD, MUTATION_METHOD, K_NEIGHBORS, ENCODING_METHOD, BEST_CHROMOSOME_CONVERGENCE_LIMIT, \
            PERCENTAGE_CHROMOSOME_CONVERGENCE_LIMIT
 
@@ -70,8 +75,8 @@ def fetch_neighborhood(user, tabular_np, k):
         if i != user:
             pearson = evaluate_chromosome(data_vector[i][0], user_vector)
             # check if the given vectors have the same non-zero indeces
-            if numpy.where(user_vector > 0)[0].shape[0] == numpy.where(data_vector[i][0] > 0)[0].shape[0]:
-                if numpy.where(user_vector > 0)[0] == numpy.where(data_vector[i][0] > 0)[0]:
+            if numpy.equal(numpy.where(user_vector == 0)[0].shape, numpy.where(data_vector[i][0] == 0)[0].shape):
+                if numpy.equal(numpy.where(user_vector == 0)[0], numpy.where(data_vector[i][0] == 0)[0]):
                     # adjust pearson coefficient to minimum for we do not want that vector to be chosen
                     pearson = -2
                     print('Warning [2]: Same indeces are evaluated [at fetch neighborhood]')
@@ -569,6 +574,7 @@ def evaluate_generation(population, optim):
 def genetic_algorithm_convergence(evaluation_best_chr, evaluation_overall_gen, gen, population, optim,
                                   BEST_CHR_CONV_LIM, BEST_CHR_CONV_CTR, PERCENT_CHR_CONV_LIM):
     stop = False
+    cause = list()
     for conv_method in ("best_chr", "percentage", "generation"):
         if conv_method == 'best_chr':
             gen_eval = evaluate_best_chromosome(population, optim)
@@ -577,6 +583,7 @@ def genetic_algorithm_convergence(evaluation_best_chr, evaluation_overall_gen, g
                 BEST_CHR_CONV_CTR += 1
                 if BEST_CHR_CONV_CTR > BEST_CHR_CONV_LIM:
                     stop = True
+                    cause.append('best_chr')
                 else:
                     BEST_CHR_CONV_CTR = 0
         elif conv_method == 'percentage':
@@ -584,13 +591,15 @@ def genetic_algorithm_convergence(evaluation_best_chr, evaluation_overall_gen, g
             evaluation_overall_gen[gen] = gen_eval
             if numpy.abs(evaluation_overall_gen[gen] - evaluation_overall_gen[gen - 1]) < PERCENT_CHR_CONV_LIM:
                 stop = True
+                cause.append('percentage')
         elif conv_method == 'generation':
-            if gen == 0:
-                print('Warning [4]: Algorithm does not perform early stopping [at genetic algorithm convergence]')
+            # if gen == 0:
+            #   print('Warning [4]: Algorithm does not perform early stopping [at genetic algorithm convergence]')
+            return stop, evaluation_best_chr, evaluation_overall_gen, BEST_CHR_CONV_CTR, cause
         else:
             print('Error [9]: Invalid mutation method [at mutate chromosomes]\nExiting...')
             exit()
-    return stop, evaluation_best_chr, evaluation_overall_gen, BEST_CHR_CONV_CTR
+    return stop, evaluation_best_chr, evaluation_overall_gen, BEST_CHR_CONV_CTR, cause
 
 
 def save_population(user, population, optim):
@@ -625,7 +634,7 @@ def save_evaluations(user, population, optim):
 
 def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CROSS_M, MUT_METHOD, K, items, encoding,
                           BEST_CHR_CONV_LIM, PERCENT_CHR_CONV_LIM):
-    for user in tqdm.tqdm(range(items.shape[0])):
+    for user in tqdm.tqdm_notebook(range(items.shape[0])):
         # define evaluations list to plot afterwards
         U_EVALS_LIST = list()
         # fetch user's rating top - k neighbors (k=10)
@@ -639,7 +648,7 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
         optim_mean = numpy.count_nonzero([optim_values], axis=1)
         # find mean of all k vectors and flatten optimal solution to a single vector
         optim_values = optim_values.sum(axis=0)
-        # optim_indeces = optim_indeces[optim_values != 0]
+        optim_indeces = optim_indeces[optim_values != 0]
         optim_values = optim_values[optim_values != 0]
         optim_mean = optim_mean[optim_mean != 0]
         optim_values = optim_values / optim_mean
@@ -648,24 +657,28 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
         # random initialize population (chromosomes)
         chromosomes = numpy.random.choice(numpy.unique(optim_values), (P_SIZE, optim_values.shape[0]))
         # initialize error (best_chr) array
-        evaluation_best_chr = numpy.zeros(optim_values.shape[0])
+        evaluation_best_chr = numpy.zeros(N_GEN)
         # initialize error (gen) array
-        evaluation_overall_gen = numpy.zeros(optim_values.shape[0])
+        evaluation_overall_gen = numpy.zeros(N_GEN)
         # initialize best_chr counter
         BEST_CHR_CONV_CTR = 0
         # initialize early stopping conditional
         stop = False
         # fit GA
-        for gen in tqdm.tqdm(range(N_GEN)):
+        for gen in tqdm.tqdm_notebook(range(N_GEN)):
             # select and crossover population
             chromosomes = crossover_chromosomes(X_PROBABILITY, CROSS_M, SEL_M, chromosomes, optim_values, encoding)
             # mutate chromosomes
             chromosomes = mutate_chromosomes(M_PROBABILITY, MUT_METHOD, chromosomes, optim_values)
             # check GA convergence
-            stop, evaluation_best_chr, evaluation_overall_gen, BEST_CHR_CONV_CTR = genetic_algorithm_convergence(
-                evaluation_best_chr, evaluation_overall_gen, gen, chromosomes, optim_values, BEST_CHR_CONV_LIM,
-                BEST_CHR_CONV_CTR, PERCENT_CHR_CONV_LIM)
+            stop, evaluation_best_chr, evaluation_overall_gen, BEST_CHR_CONV_CTR, cause = \
+                genetic_algorithm_convergence(evaluation_best_chr, evaluation_overall_gen, gen,
+                                              chromosomes, optim_values, BEST_CHR_CONV_LIM, BEST_CHR_CONV_CTR,
+                                              PERCENT_CHR_CONV_LIM)
+            # if GA converges
             if stop is True:
+                # print met GA convergence conditional
+                print("User [", user, "]\tGen [", gen, "]\t: GA converged (", cause, ")")
                 # save population
                 save_population(user, chromosomes, optim_values)
                 # save different fitness metrics
@@ -673,29 +686,23 @@ def fit_genetic_algorithm(M_PROBABILITY, X_PROBABILITY, P_SIZE, N_GEN, SEL_M, CR
                 # stop fitting
                 break
             # custom convergence conditional: evaluate by chromosome accuracy [90% accuracy convergence]
-            if numpy.mean(numpy.fromiter(
-                    (evaluate_chromosome(chromosomes[i], optim_values) for i in range(chromosomes.shape[0])),
-                    numpy.int64)) / chromosomes[0].shape[0] > 0.9:
+            if numpy.mean(numpy.fromiter((evaluate_chromosome(chromosomes[i], optim_values)
+                                          for i in range(chromosomes.shape[0])), numpy.int64)) / \
+                    chromosomes[0].shape[0] > 0.9:
                 # print population accuracy
-                print("Mean accuracy: ", numpy.mean(numpy.fromiter(
-                    (evaluate_chromosome(chromosomes[i], optim_values) for i in range(chromosomes.shape[0])),
-                    numpy.int64)), "\tTotal chromosomes: ", chromosomes[0].shape[0])
+                print("Mean accuracy: ", numpy.mean(numpy.fromiter((evaluate_chromosome(chromosomes[i], optim_values)
+                                                                    for i in range(chromosomes.shape[0])),
+                                                                   numpy.int64)), "\tTotal chromosomes: ",
+                      chromosomes[0].shape[0])
                 # save population
                 save_population(user, chromosomes, optim_values)
                 # save different fitness metrics
                 save_evaluations(user, chromosomes, optim_values)
                 # stop fitting
                 break
-
-            # every 1000 generations print mean population evaluation
-            if gen % 1000 == 999:
-                print(numpy.mean(numpy.fromiter(
-                    (evaluate_chromosome(chromosomes[i], optim_values) for i in range(chromosomes.shape[0])),
-                    numpy.int64)))
-
             # append mean population fitness
-            U_EVALS_LIST.append(numpy.mean(numpy.fromiter((evaluate_chromosome(chromosomes[i], optim_values) for i in
-                                                           range(chromosomes.shape[0])), numpy.int64)))
+            U_EVALS_LIST.append(numpy.mean(numpy.fromiter((evaluate_chromosome(chromosomes[i], optim_values) for i
+                                                           in range(chromosomes.shape[0])), numpy.int64)))
         # save population
         save_population(user, chromosomes, optim_values)
         # save different fitness metrics
